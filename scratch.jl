@@ -3,7 +3,7 @@ opt = ADAM(0.01)
 
 function ugh(net, opt, epochs, loader)
     for epoch in 1:epochs
-        r = Float32.(randn(Z, loader.batchsize)) |> gpu
+        r = (randn(Z, loader.batchsize)) |> gpu
         train!(net, opt, loader, r)
         println("Finished epoch $epoch")
     end
@@ -20,9 +20,7 @@ function train!(net, opt, loader, r₀)
     for (i, xs) in enumerate(loader)
         x = xs |> Flux.flatten |> gpu
 
-        rhat = Zygote.ignore() do
-        ISTA(x, r₀, net, η=0.01, λ=0.001, target=0.5)
-        end
+        rhat = ISTA(x, r₀, net, η=0.01, λ=0.001, target=0.25)
         
         grad = pc_gradient(net, x, rhat)
         update!(opt, Flux.params(net), grad)

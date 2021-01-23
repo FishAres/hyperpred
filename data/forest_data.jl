@@ -1,8 +1,7 @@
 using LinearAlgebra, Statistics, Random
 using NPZ, JLD2
-using Plots
 
-data = npzread("forrest.npy");
+data = npzread("data/forrest.npy");
 
 tlength = 7
 interval = 5
@@ -30,11 +29,11 @@ for t in tidx
     end
 end
 
-plt = plot()
-anim = @animate for t = 1:tlength
-    heatmap!(plt, clips[t,:,:,3460], color=:greys, colorbar=:none)
-end
-gif(anim, fps=2)
+# plt = plot()
+# anim = @animate for t = 1:tlength
+#     heatmap!(plt, clips[t,:,:,3460], color=:greys, colorbar=:none)
+# end
+# gif(anim, fps=2)
 
 idx = shuffle(Array(1:size(clips, 4)))
 clips = clips[:,:,:,idx]
@@ -43,5 +42,5 @@ split = Int64(ceil(size(clips, 4) * 0.9))
 train_data = clips[:,:,:,1:split]
 test_data = clips[:,:,:,split + 1:end]
 
-@save "training_forest.jld2" train_data
-@save "testing_forest.jld2" test_data
+@save "data/training_forest.jld2" train_data
+@save "datatesting_forest.jld2" test_data

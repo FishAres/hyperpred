@@ -32,7 +32,6 @@ end
 xs = first(train_loader)
 T = size(xs, 1) # no. of time slices
 Z = 100 # latent dim
-batchsize = size(xs, 4)
 wh = size(xs, 2)
 
 pnet = Dense(Z, 400, σ) |> gpu
@@ -74,7 +73,7 @@ end
 
 ##
 
-train(pnet, opt, train_loader, 3)
+@time train(pnet, opt, train_loader, 3)
 
 ##
 xs = first(train_loader)
@@ -82,7 +81,7 @@ x = xs |> Flux.flatten |> gpu
 r = Float32.(randn(Z, batchsize)) |> gpu
 
 # Choice of ISTA parameters is important
-@profview rhat = ISTA(x, r, pnet, η=0.01, λ=0.001, target=0.2)
+rhat = ISTA(x, r, pnet, η=0.01, λ=0.001, target=0.5)
 plot(rhat[:] |> cpu)
 
 pred = pnet(rhat)
