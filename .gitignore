@@ -1,0 +1,4 @@
+*.npy
+*.jld2
+__pycache__/
+.vscode/
