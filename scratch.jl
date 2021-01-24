@@ -1,15 +1,17 @@
-pnet = Dense(Z, 400, σ; initW=Flux.kaiming_normal) |> gpu
-opt = ADAM(0.01)
+Z = 16
+pnet = Dense(Z, 400, σ; initW=Flux.glorot_uniform ) # |> gpu
+opt = RMSProp(0.02)
+
 
 function ugh(net, opt, epochs, loader)
     for epoch in 1:epochs
-        r = (randn(Z, loader.batchsize)) |> gpu
+        r = Float32.(randn(Z, loader.batchsize)) # |> gpu
         train!(net, opt, loader, r)
         println("Finished epoch $epoch")
     end
 end
 
-@profview ugh(pnet, opt, 2, train_loader)
+ugh(pnet, opt, 3, train_loader)
 
 function train!(net, opt, loader, r₀)
     scaling = 1 / loader.nobs # 1/N to compute mean loss
@@ -18,9 +20,11 @@ function train!(net, opt, loader, r₀)
     loss_ = 0.0
     strt = time()
     for (i, xs) in enumerate(loader)
-        x = xs |> Flux.flatten |> gpu
+        x = xs |> Flux.flatten # |> gpu
 
-        rhat = ISTA(x, r₀, net, η=0.01, λ=0.001, target=0.25)
+        rhat = Zygote.ignore() do
+            ISTA(x, r₀, net, η=0.01, λ=0.001, target=0.25)
+        end
         
         grad = pc_gradient(net, x, rhat)
         update!(opt, Flux.params(net), grad)
@@ -33,7 +37,9 @@ function train!(net, opt, loader, r₀)
         end
         loss_ += scaling * l_
     end
+    loss_ = round(loss_, digits=3)
     tot_time = round(time() - strt, digits=3)
+    
     println("Trained 1 epoch, loss = $loss_, took $tot_time s")
 end
 

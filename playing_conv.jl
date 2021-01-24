@@ -7,84 +7,113 @@ using Flux: destructure, Data.DataLoader, update!
 using Zygote
 
 CUDA.allowscalar(false)
-
-include("utils.jl")
+includet("utils.jl")
 
 # @load "training_forest.jld2" train_data
 # @load "testing_forest.jld2" test_data
 
 batchsize = 32
-@load "train_mnist.jld2" train_data
-train_loader = DataLoader(train_data, batchsize=batchsize,
+@load "data/train_mnist.jld2" train_data
+
+static_data = Float32.(Flux.unsqueeze(train_data[4,:,:,:], 3))
+static_data = @.(2f0 * static_data - 1f0) 
+
+train_loader = DataLoader(static_data, batchsize=batchsize,
                           shuffle=true, partial=false)
 
 ## 
 
-# function pc_loss(x, r, pred)
-
-function pc_gradient(net, x, pred, r)
+function pc_gradient(net, x, r)
     grad = gradient(Flux.params(net)) do
-        err = x .- pred
-        Zygote.ignore() do
-            rhat = ISTA(x, r, net)
-        end
-        pred = net(rhat)
-        l = loss(pred, x)
+        loss(net(r), x)
     end
-    return grad, pred
+    return grad
 end
-
-##
 
 xs = first(train_loader)
 T = size(xs, 1) # no. of time slices
-Z = 36 # latent dim
-batchsize = size(xs, 4)
+Z = 100 # latent dim
 wh = size(xs, 2)
 
-N = 64
-pconv = Chain(
-    x -> reshape(x, (6, 6, 1, size(x, 4))),
-    ConvTranspose((4,4), 1 => N, relu, stride=1, pad=0),
-    MaxPool((2,2)),
-    ConvTranspose((4,4), N => 1, sigmoid, stride=2, pad=0),
-) |> gpu
-
-opt = RMSProp(0.01)
 loss(x, y) = Flux.mse(x, y)
 
-function train(net, opt, loader, epochs)
+function train!(net, opt, loader, r₀)
     scaling = 1 / loader.nobs # 1/N to compute mean loss
-    for epoch in 1:epochs
-        r₀ = randn(Z, 1, 1, loader.batchsize)
-        r = Float32.(deepcopy(r₀)) |> gpu
-        pred₀ = net(r)
-        pred = Float32.(pred₀)
-        loss_ = 0.0
-        for (i, xs) in enumerate(loader)
-            x = Float32.(Flux.unsqueeze(xs[4,:,:,:], 3)) |> gpu
-            grad, pred = pc_gradient(net, x, pred, r)
-            update!(opt, Flux.params(net), grad)
-            loss_ += scaling * loss(pred, x)
+    " 1 layer deeper - use once per epoch
+        next: add a function that does everything inside the loading loop"
+    loss_ = 0.0
+    strt = time()
+    # L = Array{Float32}(undef, loader.nobs)
+    for (i, xs) in enumerate(loader)
+        x = xs |> gpu
+
+        rhat = Zygote.ignore() do
+            ISTA(x, r₀, net, η=0.01, λ=0.001f0, target=0.25f0)
         end
-        println("Trained $epoch epochs, loss = $loss_")
+        grad = pc_gradient(net, x, rhat)
+        update!(opt, Flux.params(net), grad)
+        
+        l_ = loss(net(rhat), x)
+        isnan(l_) && dumb_print("NaN encountered") && break
+        loss_ += scaling * l_
+        # L[i] = l_
     end
+    loss_ = round(loss_, digits=3)
+    tot_time = round(time() - strt, digits=3)
+    println("Trained 1 epoch, loss = $loss_, took $tot_time s")
+    # return L
 end
 
-##
+## 
 
-train(pconv, opt, train_loader, 20)
+nthroot(x, n) = x^(1/n)
 
-##
-xs = first(train_loader)
-x = Float32.(Flux.unsqueeze(xs[10,:,:,:], 3)) |> gpu
+isqrt(x, n) = @as z x begin
+    x -> nthroot(x, n)
+    round
+    Int
+end
 
-r = Float32.(randn(Z, 1, 1, batchsize)) |> gpu
+Z = 36
+lsize = 125
+m = isqrt(lsize, 3)
+# map(x -> x^3, 1:10)'
 
-# gradient(() -> loss(x, pconv(rhat)), Flux.params(r))
 
-rhat = Float32.(ISTA(x, r, pconv, optimizer=Descent))
+net = Chain(
+    Dense(Z, lsize, relu),
+    x -> reshape(x, m, m, m, batchsize),
+    x -> upsample_nearest(x, (4,4)),
+    # ConvTranspose((6,6), 1=>lsize, gelu, stride=2, pad=0),
+    # BatchNorm(1),
+    ConvTranspose((5,5), m=>1, tanh, stride=1, pad=2),
 
-pred = pconv(rhat)
+) |> dev
 
-heatmap(pred[:,:,1, rand(1:batchsize)] |> cpu)
+# net(r)
+
+
+
+opt = RMSProp(0.01)
+epochs = 5
+# L = []
+for epoch in 1:epochs
+    r = Float32.(randn(Z, train_loader.batchsize)) |> sparsify |> gpu
+    l = train!(net, opt, train_loader, r)
+    # push!(L, l)
+    println("Finished epoch $epoch")
+end
+
+## 
+
+dev = gpu
+xs = first(train_loader) |> dev
+r = Float32.(randn(Z, batchsize))  |> dev
+
+rhat = ISTA(xs, r, net, η=0.01f0, λ=0.001f0, target=0.25f0)
+
+plot(rhat[:] |> cpu)
+sparsity(rhat[:])
+
+pred = net(rhat)
+heatmap(pred[:,:,1,rand(1:batchsize)] |> cpu)
