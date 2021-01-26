@@ -12,11 +12,11 @@ includet("utils.jl")
 # @load "training_forest.jld2" train_data
 # @load "testing_forest.jld2" test_data
 
-batchsize = 32
-@load "data/train_mnist.jld2" train_data
+batchsize = 50
+@load "data/training_forest.jld2" train_data
 
 static_data = Float32.(Flux.unsqueeze(train_data[4,:,:,:], 3))
-static_data = @.(2f0 * static_data - 1f0) 
+# static_data = @.(2f0 * static_data - 1f0) 
 
 train_loader = DataLoader(static_data, batchsize=batchsize,
                           shuffle=true, partial=false)
@@ -66,20 +66,20 @@ end
 
 ## 
 
-nthroot(x, n) = x^(1/n)
+root(x, n) = x^(1/n)
 
 isqrt(x, n) = @as z x begin
-    x -> nthroot(x, n)
+    x -> root(x, n)
     round
     Int
 end
 
-Z = 36
-lsize = 125
+Z = 64
+lsize = 512
 m = isqrt(lsize, 3)
 # map(x -> x^3, 1:10)'
 
-
+dev = gpu
 net = Chain(
     Dense(Z, lsize, relu),
     x -> reshape(x, m, m, m, batchsize),
@@ -90,16 +90,24 @@ net = Chain(
 
 ) |> dev
 
-# net(r)
+forest_net = Chain(
+    Dense(Z, lsize, relu),
+    x -> reshape(x, m, m, m, batchsize),
+    # x -> upsample_nearest(x, (2,2)),
+    ConvTranspose((4,4), m=>1, tanh, stride=2, pad=1),
+) |> gpu
 
+# forest_net(r)
+# heatmap(forest_net(r)[:,:,1,rand(1:batchsize)] |> cpu)
 
+## 
 
-opt = RMSProp(0.01)
-epochs = 5
+opt = ADAM(0.01)
+epochs = 4
 # L = []
 for epoch in 1:epochs
     r = Float32.(randn(Z, train_loader.batchsize)) |> sparsify |> gpu
-    l = train!(net, opt, train_loader, r)
+    l = train!(forest_net, opt, train_loader, r)
     # push!(L, l)
     println("Finished epoch $epoch")
 end
@@ -108,12 +116,12 @@ end
 
 dev = gpu
 xs = first(train_loader) |> dev
-r = Float32.(randn(Z, batchsize))  |> dev
+r = Float32.(randn(Z, batchsize))  |> sparsify |> dev
 
-rhat = ISTA(xs, r, net, η=0.01f0, λ=0.001f0, target=0.25f0)
+rhat = ISTA(xs, r, forest_net, η=0.01f0, λ=0.001f0, target=0.4f0)
 
-plot(rhat[:] |> cpu)
-sparsity(rhat[:])
-
-pred = net(rhat)
+# plot(rhat[:] |> cpu)
+# sparsity(rhat[:])
+# heatmap(forest_net.layers[3].weight[:,:,1,rand(1:m)] |> cpu)
+pred = forest_net(rhat)
 heatmap(pred[:,:,1,rand(1:batchsize)] |> cpu)
