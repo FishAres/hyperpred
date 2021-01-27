@@ -29,11 +29,11 @@ test_loader = DataLoader(Float32.(static_test_data), batchsize=batchsize,
 ##
 
 Z = 5
-input_size = 64
-sRNN(input_size, output_size) = Flux.Recur(Flux.RNNCell(input_size, output_size))
+N = 64
+sRNN(N, output_size) = Flux.Recur(Flux.RNNCell(N, output_size))
 
-hypernet(input_size, Z) = Chain(
-    sRNN(input_size, 400),
+hypernet(N, Z) = Chain(
+    sRNN(N, 400),
     Dense(400, 500),
     BatchNorm(500),
     x -> elu.(x),
@@ -46,26 +46,25 @@ hypernet(input_size, Z) = Chain(
     Dense(100, Z)
 )
 
-Vmix = 0.01randn(Z, input_size, input_size)
+Vmix = 0.01randn(Z, N, N)
 
-hnet = hypernet(input_size, Z)
-r = randn(input_size, batchsize)
+hnet = hypernet(N, Z)
+r = randn(N, batchsize)
 w = hnet(r)
 
-w' * reshape(Vmix, Z, input_size * input_size)
-
 function pred_mix(w, V, Z)
-    out = w' * reshape(V, Z, input_size * input_size)
-    reshape(out, input_size, input_size, batchsize)
+    out = w' * reshape(V, Z, N * N)
+    reshape(out, N, N, batchsize)
 end
 
 Vᵥ = pred_mix(w, Vmix, Z)
 
-r̂ = batched_mul(Vᵥ, Flux.unsqueeze(r, 3))
+r̂ = batched_mul(Vᵥ, Flux.unsqueeze(r, 2))
 
 
 xs = first(train_loader)
 x = xs |> Flux.flatten
 
+permutedims(Vᵥ, [3,1,2])
 
 θ, re = destructure(net)
