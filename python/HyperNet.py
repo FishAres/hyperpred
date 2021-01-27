@@ -122,7 +122,7 @@ class PredCodeNet(nn.Module):
             optim.zero_grad()
             self.zero_grad()
             # prox
-            r.data = PredCodeNet.soft_thresholding_(r, self.lmda)
+            r.data = self.soft_thresholding_(r, self.lmda)
             # convergence
             converged = torch.norm(r - old_r) / torch.norm(old_r) < 0.01
             #print(torch.norm(r - old_r) / torch.norm(old_r))

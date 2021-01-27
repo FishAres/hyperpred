@@ -1,4 +1,7 @@
 *.npy
 *.jld2
+*.bson
 __pycache__/
 .vscode/
+.saved_models/
+.ignore/

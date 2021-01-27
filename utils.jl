@@ -9,8 +9,9 @@ function soft_threshold(x, λ)
     relu(x - λ) - relu(-x - λ)
 end
 
-function cuda_relu(x)
-    CUDA.max(0.0f0, x)
+function norm_rf!(U)
+    U .= U ./ (sqrt.(sum(U.^2, dims=1)) .+ 1f-12)
+    # U .= Flux.normalise(U, dims=1)
 end
 
 converged(r, r₀; σ=0.01f0) = (norm(r .- r₀) / (norm(r₀) + 1f-12)) < σ
@@ -36,24 +37,27 @@ function ISTA_grad(I::AbstractArray{Float32}, net::Any, r::AbstractArray{Float32
     " options: 
     - custom adjoint (d = r * err)
     "
+    # gradient(() -> loss_fn(I, net.layers[1](r)), Flux.params(r))
     gradient(() -> loss_fn(I, net(r)), Flux.params(r))
 end
 
 Zygote.@nograd function ISTA(I, r, net;
                     η=0.01,
                     λ=0.001f0,
-                    target=0.5f0)
+                    target=0.01f0)
 
     " Takes way too much time"
     opt = Descent(η)
-    maxiter = 300
+    maxiter = 100
+    # r₀ = r
     for i in 1:maxiter
+        r₀ = r
         grad = ISTA_grad(I, net, r)
         
         update!(opt, Flux.params(r), grad)
         r = soft_threshold.(r, λ)
-        
-        sparse_converged(r[:], target=target) && break
+        converged(r, r₀, σ=target) && break
+        sparse_converged(r[:], target=0.3) && break
     end
     return r
 end
@@ -61,9 +65,9 @@ end
 function imshow_Wcol(i, W)
     m = sqrt(size(W, 1)) |> Int
     heatmap(
-        @as x W[:,i] begin
-        reshape(x, m, m) 
-    end)
+       W[:,i] |> x -> reshape(x, m, m),
+       c=:grayC,
+    )
 end
 
 function quick_anim(data)
