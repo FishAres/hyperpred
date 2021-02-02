@@ -3,6 +3,7 @@ using Flux
 using Plots: plot, @animate, heatmap!, gif
 using Lazy: @as
 
+
 loss_fn(x, y) = Flux.mse(x, y)
 
 function soft_threshold(x, λ)
@@ -11,7 +12,6 @@ end
 
 function norm_rf!(U)
     U .= U ./ (sqrt.(sum(U.^2, dims=1)) .+ 1f-12)
-    # U .= Flux.normalise(U, dims=1)
 end
 
 converged(r, r₀; σ=0.01f0) = (norm(r .- r₀) / (norm(r₀) + 1f-12)) < σ
@@ -34,7 +34,7 @@ function dumb_print(x)
 end
 
 function ISTA_grad(I::AbstractArray{Float32}, net::Any, r::AbstractArray{Float32})
-    " options: 
+    " options:
     - custom adjoint (d = r * err)
     "
     # gradient(() -> loss_fn(I, net.layers[1](r)), Flux.params(r))
@@ -53,7 +53,7 @@ Zygote.@nograd function ISTA(I, r, net;
     for i in 1:maxiter
         r₀ = r
         grad = ISTA_grad(I, net, r)
-        
+
         update!(opt, Flux.params(r), grad)
         r = soft_threshold.(r, λ)
         converged(r, r₀, σ=target) && break
@@ -114,5 +114,5 @@ function plot_rf(rf, out_dim, M)
         ax.set_aspect("equal")
     end
     fig.subplots_adjust(wspace=0.0, hspace=0.0)
-    return fig 
+    return fig
 end

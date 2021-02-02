@@ -1,4 +1,4 @@
-## 
+##
 using LinearAlgebra, Statistics
 using JLD2, BSON
 using Flux, CUDA, Distributions
@@ -27,10 +27,10 @@ train_loader = DataLoader(Float32.(static_data), batchsize=batchsize,
 test_loader = DataLoader(Float32.(static_test_data), batchsize=batchsize,
                           shuffle=true, partial=false)
 
-## 
+##
 
 function pc_gradient(net, x, r)
-    grad = gradient(Flux.params(net)) do 
+    grad = gradient(Flux.params(net)) do
         loss(net(r), x)
     end
     return grad
@@ -51,7 +51,7 @@ function train!(net, opt, loader)
     loss_ = 0.0
     strt = time()
     for (i, xs) in enumerate(loader)
-        x = xs |> Flux.flatten |> normalize |> dev 
+        x = xs |> Flux.flatten |> normalize |> dev
         r̂ = prop_err(net, x)
 
         r = Zygote.ignore() do
@@ -71,10 +71,10 @@ function train!(net, opt, loader)
     loss_ = round(loss_, digits=6)
     tot_time = round(time() - strt, digits=3)
     println("Trained 1 epoch, loss = $loss_, took $tot_time s")
-    
+
 end
 
-## 
+##
 dev = gpu
 Z = 100
 pnet = Dense(Z, 256) |> dev
