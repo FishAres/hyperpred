@@ -70,12 +70,12 @@ function imshow_Wcol(i, W)
     )
 end
 
-function quick_anim(data)
+function quick_anim(data; fps=2)
     plt = plot()
     anim = @animate for t = 1:size(data, 1)
         heatmap!(data[t, :, :], color=:greys, colorbar=:none)
     end
-    gif(anim, fps=2)
+    gif(anim, fps=fps)
 end
 
 function sparsify(x; θ=0.2f0)

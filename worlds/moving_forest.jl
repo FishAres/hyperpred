@@ -1,14 +1,32 @@
 ##
 using LinearAlgebra, Statistics
-using RecursiveArrayTools
-using JLD2, BSON
+using RecursiveArrayTools: VectorOfArray
+using JLD2, BSON, NPZ
 using Flux, CUDA
 using Plots
 using Flux: Data.DataLoader, update!
 using Zygote
+using MLStyle
+
+gr()
 
 CUDA.allowscalar(false)
 includet("../utils.jl")
+
+const movements = Dict(
+    "left"  => [-1, 0],
+    "right" => [1,  0],
+    "up"    => [0,  1],
+    "down"  => [0, -1],
+    )
+
+
+const mov_inds = Dict(
+    "left"  => 1,
+    "right" => 2,
+    "up"    => 3,
+    "down"  => 4,
+    )
 
 @load "data/training_winforest.jld2" train
 
@@ -16,57 +34,80 @@ train_data = convert(Array, VectorOfArray(train))
 
 # BSON.@load "saved_models/modelv2_100ep.bson" net
 
-ind = 6; heatmap(train_data[:,:,ind,1])
 
-using NPZ
-orig = npzread("..data/forrest.npy")
+orig = npzread("data/forrest.npy")
+size(orig)
 
-heatmap(orig[1, :,:, 1])
+data = orig[1,:,:,1]
+fsize = [16, 16]
+bounds = map((x, f) -> Int(floor(x / f)), size(data), fsize)
 
-function get_blocks(x, fsize)
-    " Divide MxN image into blocks of fsize[1] x fsize[2]"
-    # max number of windows
-    bounds = map((x, f) -> Int(floor(x / f)), size(x), fsize)
-    # initialize
-    out = zeros(fsize..., prod(bounds))
-    function blockinds(ind, fs)
-        "return min, max indices for each block"
-        (ind - 1) * fs + 1, ind * fs
+function get_block(img, pos, fs)
+    r = @. Int(floor(fs / 2))
+    x, y = pos
+    x1, x2 = [x - r[1] + 1, x + r[1]]
+    y1, y2 = [y - r[2] + 1, y + r[2]]
+    inds = CartesianIndices((x1:x2, y1:y2))
+    return img[inds]
+end
+
+"Needs fixing "
+function pick_move(pos, dir; p=0.0)
+    tpos = pos + movements[dir]
+    exc = tpos .>= bounds
+    if Bool((&)(exc...))
+        newdir = rand(["left, down"])
+    elseif Bool(exc[1])
+        newdir = rand(["left", "up", "down"])
+    elseif Bool(exc[2])
+        newdir = rand(["up", "left", "right"])
+    elseif sum(exc) < 1 && rand() < p
+        newdir = rand(keys(movements))
+    else
+        newdir = dir
     end
-    cnt = 1
-    ind_array = zeros(Int64, prod(bounds), 2)
-    for yind in 1:bounds[2]
-        for xind in 1:bounds[1]
-            x1, x2 = blockinds(xind, fsize[1])
-            y1, y2 = blockinds(yind, fsize[2])
+    newdir
+end
 
-            i = CartesianIndices((x1:x2, y1:y2))
-            out[:,:, cnt] .= x[i]
-            ind_array[cnt, :] = [xind, yind]
-            cnt += 1
+function make_traj(img, fs; len=20)
+    r = @. Int(floor(fs / 2))
+    bounds = size(img) .- r
+    pos = map((x, y) -> rand(x:y), r, bounds) # random initial position
+    dir = rand(keys(movements)) # (index of) random initial heading
+    out = zeros(fs..., len) # initialize output array
+
+    p = 4 / len # probability of changing direction
+    actions = zeros(len)
+    for t in 1:len
+        out[:,:,t] = get_block(img, pos, fs)
+
+        dir = pick_move(pos, dir, p=p)
+        actions[t] = mov_inds[dir]
+        pos += movements[dir]
+    end
+    return out, actions
+end
+
+# quick_anim(permutedims(make_traj(data, fsize), [3,1,2]), fps=1)
+r = @. Int(floor(fsize / 2))
+bounds = size(data) .- r
+r, bounds
+
+function get_trajs(data, no_traj, fsize)
+    T, A = [], []
+    t = 0
+    while t < no_traj
+        try
+            out, actions = make_traj(data, fsize)
+            push!(T, out)
+            push!(A, actions)
+            t += 1
+        catch
+            nothing
         end
     end
-    return out, ind_array
-end
-
-fsize = (16, 16)
-
-a = get_blocks(orig[1,:,:,1], fsize)
-a[2]
-
-function forest_div(data, fsize; train_fr=0.75, save=true)
-    "Divide video into [fsize[1], fsize[2], :]
-    frames"
-    Img, inds = [], []
-    for t in 1:size(data, 1)
-        out, ind = get_blocks(data[i,:,:], fsize)
-        push!(Img, out)
-        push!(inds, ind)
+    T, A
     end
 
-    return out
-end
-
-b = forest_div(orig[:,:,:,1], fsize)
-
-[a[1] for a in b]
+ts, as = get_trajs(data, 10, fsize)
+quick_anim(permutedims(ts[2], [3,1,2]), fps=1)
