@@ -37,7 +37,6 @@ function ISTA_grad(I::AbstractArray{Float32}, net::Any, r::AbstractArray{Float32
     " options:
     - custom adjoint (d = r * err)
     "
-    # gradient(() -> loss_fn(I, net.layers[1](r)), Flux.params(r))
     gradient(() -> loss_fn(I, net(r)), Flux.params(r))
 end
 
@@ -70,12 +69,12 @@ function imshow_Wcol(i, W)
     )
 end
 
-function quick_anim(data; fps=2)
+function quick_anim(data; fps=2, savestring="digabagooool.gif")
     plt = plot()
     anim = @animate for t = 1:size(data, 1)
         heatmap!(data[t, :, :], color=:greys, colorbar=:none)
     end
-    gif(anim, fps=fps)
+    gif(anim, savestring, fps=fps)
 end
 
 function sparsify(x; θ=0.2f0)

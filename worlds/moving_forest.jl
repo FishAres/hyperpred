@@ -1,14 +1,10 @@
 ##
 using LinearAlgebra, Statistics
-using RecursiveArrayTools: VectorOfArray
-using JLD2, BSON, NPZ
+using JLD2, NPZ, BSON
 using Flux, CUDA
 using Plots
 using Flux: Data.DataLoader, update!
 using Zygote
-using MLStyle
-
-gr()
 
 CUDA.allowscalar(false)
 includet("../utils.jl")
@@ -27,12 +23,6 @@ const mov_inds = Dict(
     "up"    => 3,
     "down"  => 4,
     )
-
-@load "data/training_winforest.jld2" train
-
-train_data = convert(Array, VectorOfArray(train))
-
-# BSON.@load "saved_models/modelv2_100ep.bson" net
 
 
 orig = npzread("data/forrest.npy")
@@ -88,10 +78,6 @@ function make_traj(img, fs; len=20)
     return out, actions
 end
 
-# quick_anim(permutedims(make_traj(data, fsize), [3,1,2]), fps=1)
-r = @. Int(floor(fsize / 2))
-bounds = size(data) .- r
-r, bounds
 
 function get_trajs(data, no_traj, fsize)
     T, A = [], []
@@ -109,5 +95,12 @@ function get_trajs(data, no_traj, fsize)
     T, A
     end
 
-ts, as = get_trajs(data, 10, fsize)
-quick_anim(permutedims(ts[2], [3,1,2]), fps=1)
+
+ts, as = get_trajs(data, 1000, fsize)
+@save "data/moving_forest_v1.jld2" ts as
+# quick_anim(permutedims(ts[2], [3,1,2]), fps=1)
+
+
+# BSON.@load "saved_models/modelv2_100ep.bson" net
+
+

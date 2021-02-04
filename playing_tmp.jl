@@ -79,6 +79,7 @@ dev = gpu
 Z = 100
 pnet = Dense(Z, 256) |> dev
 opt = RMSProp(0.01)
+
 epochs = 100
 
 for epoch in 1:epochs
@@ -90,7 +91,7 @@ end
 xs = first(test_loader)
 x = xs |> Flux.flatten |> dev
 r = (prop_err(pnet, x))
-rhat = ISTA(x, r, pnet, η=0.01f0, λ=0.001f0, target=0.001f0)
+rhat = ISTA(x, r, pnet, η=0.01f0, λ=0.001f0, target=0.0005f0)
 println("Sparsity : $(sparsity(rhat))")
 
 pred = pnet(rhat)
@@ -99,19 +100,20 @@ println("Loss : $(loss(pred, x)) ")
 # imshow_Wcol(rand(1:batchsize), pred |> cpu)
 
 begin
-    i = 3
+    i = 5
     l = @layout [a b]
     im1 = imshow_Wcol(i, pred |> cpu)
     im2 = imshow_Wcol(i, x |> cpu)
     plot(im1, im2, layout=l)
 end
 
+
 ##
 
 net = cpu(pnet)
 
 # using BSON: @save, @load
-BSON.@save "saved_models/modelv2_100ep.bson" net
+# BSON.@save "saved_models/modelv2_120ep.bson" net
 
 # BSON.@load "saved_models/firstmodel.bson" pnet
 
