@@ -4,11 +4,12 @@ using Flux, CUDA
 using Plots
 using Flux: Data.DataLoader, update!
 using Zygote
-
+using Distances: cosine_dist
+plotlyjs()
 theme(:juno)
 
-BSON.@load "saved_models/modelv2_120ep.bson" net
-JLD2.@load "data/moving_forest_v1.jld2" ts as
+BSON.@load "saved_models/modelv3_399ep.bson" net
+JLD2.@load "data/moving_forest_v2.jld2" ts as
 
 CUDA.allowscalar(false)
 includet("utils.jl")
@@ -20,7 +21,6 @@ const movements = Dict(
     "up"    => [0,  1],
     "down"  => [0, -1],
     )
-
 
 const mov_inds = Dict(
     "left"  => 1,
@@ -37,7 +37,7 @@ end
 ind = 8
 x = ts[ind] |> Flux.flatten .|> Float32
 a = as[ind] .|> Int32
-# heatmap(x)
+
 r = prop_err(net, x[:,1])
 histogram(r[:])
 rhat = ISTA(x, r, net, η=0.01f0, λ=0.001f0, target=0.001f0)
@@ -56,7 +56,6 @@ end
 ##
 
 unwrap(x) = reshape(x, 16, 16)
-
 r_update(r, a, W) = r .+ W * a
 
 function init_rhat(net, x)
@@ -66,7 +65,6 @@ function init_rhat(net, x)
     rhat
 end
 opt = Descent(0.01)
-
 action_labels = map(x -> Float32.(Flux.onehotbatch(x, 1:4)), as) |> gpu
 
 ##
@@ -87,3 +85,30 @@ xs = map(x -> reshape(x, 256, 20), ts)
 
 tmp = collect(partition(xs, 32))
 
+##
+# 20 step sequences
+ind = 4
+x = ts[ind] |> Flux.flatten .|> Float32
+a = as[ind] .|> Int32
+
+function get_r(net, x)
+    r = prop_err(net, x)
+    rhat = ISTA(x, r, net, η=0.01f0, λ=0.001f0, target=0.001f0)
+    rhat
+end
+
+out = reduce(hcat, [get_r(net, x[:,i]) for i in 1:20])
+heatmap(out)
+
+##
+
+plot(a)
+
+# quick_anim(permutedims(ts[ind], [3,1,2]), fps=2)
+
+get_r(net, randn(Float32, 256) |> sparsify) |> net |> unwrap |> heatmap
+heatmap(net.W)
+
+plot(out[:,1])
+plot!(out[:,2])
+plot!(out[:,3])

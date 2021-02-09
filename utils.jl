@@ -45,7 +45,6 @@ Zygote.@nograd function ISTA(I, r, net;
                     λ=0.001f0,
                     target=0.01f0)
 
-    " Takes way too much time"
     opt = Descent(η)
     maxiter = 100
     # r₀ = r
