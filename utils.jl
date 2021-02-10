@@ -1,10 +1,10 @@
 using Zygote
 using Flux
 using Plots: plot, @animate, heatmap!, gif
-using Lazy: @as
+using Lazy:@as
 
 
-loss_fn(x, y) = Flux.mse(x, y)
+loss_function(x, y) = Flux.mse(x, y)
 
 function soft_threshold(x, λ)
     relu(x - λ) - relu(-x - λ)
@@ -37,9 +37,10 @@ function ISTA_grad(I::AbstractArray{Float32}, net::Any, r::AbstractArray{Float32
     " options:
     - custom adjoint (d = r * err)
     "
-    gradient(() -> loss_fn(I, net(r)), Flux.params(r))
+    gradient(() -> loss_function(I, net(r)), Flux.params(r))
 end
 
+"meow "
 Zygote.@nograd function ISTA(I, r, net;
                     η=0.01,
                     λ=0.001f0,
