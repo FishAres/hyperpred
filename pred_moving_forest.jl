@@ -4,7 +4,7 @@ using Flux, CUDA
 using Plots
 using Flux: Data.DataLoader, update!, onehot, onehotbatch, chunk, batchseq
 using Zygote
-using Distances:cosine_dist
+# using Distances:cosine_dist
 using Base.Iterators:partition
 using RecursiveArrayTools
 
@@ -39,108 +39,96 @@ end
 
 ##
 
-function get_processed_data(filename)
+function load_data(filename)
     @load filename ts as
     action_labels = map(x -> Float32.(Flux.onehotbatch(x, 1:4)), as)
     xs = map(x -> reshape(Float32.(x), 256, 20), ts)
     xs, action_labels
 end
 
-xs, as = get_processed_data("data/moving_forest_v2.jld2")
-
-function get_r(net, x)
+@inline function get_r(net, x)
+    # per batch issue?
     r = prop_err(net, x)
     rhat = ISTA(x, r, net, η=0.01f0, λ=0.001f0, target=0.001f0)
     rhat
 end
 
-function process_data(x, a)
-    r = repeat(get_r(net, x[:,1,:]), 1, 20)
-    [r; a]
-end
 
-function prepare_data(ins, batchsize)
-    xs, as = ins
+@inline function prepare_data(filename, batchsize)
+    xs, as = load_data(filename)
     N = length(xs)
-    Xx = [process_data(xs[i], as[i]) for i in 1:N]
-    Xx = convert(Array, VectorOfArray(Xx))
+    # sparse vectors
+    rs = [get_r(net, xs[i]) for i in 1:N]
+    # stack action
+    stacked_xs = map((x, y) -> [x ; y], rs, as)
+    labels = push!(rs[2:end], zeros(Float32, size(rs[1])))
+
+    xy = @. convert(Array, VectorOfArray(([stacked_xs, labels])))
     f = @. Int(floor(N / batchsize))
-    Xx = reshape(Xx,  size(Xx)[1:2]..., batchsize, f)
-    [[Xx[:,k,:,i] for k in 1:20] for i in 1:f]
+    xy =  map(x -> reshape(x, size(x)[1:2]..., batchsize, f), xy)
+    # return
+    map(x -> [[x[:,k,:,i] for k in 1:20] for i in 1:f], xy)
 end
+
+
+# xtrain, ytrain = prepare_data("data/moving_forest_v2_8k.jld2", 25)
+
+@load "data/mov_forest_training_data_8k.jld2" xtrain ytrain
+
 ##
-# need better names
-@load "data/moving_forest_v2_test.jld2" test_data
+batchsize = 25
+xtest, ytest = prepare_data("data/moving_forest_v2.jld2", batchsize)
 
-xs, as = get_processed_data("data/moving_forest_v2.jld2")
-
-Zygote.@nograd function eval_model(xs, net; device=gpu)
-    l = zeros(length(test_data))
-    for (x, rvs) in zip(xs, test_data)
-        x = x |> device
-        r = prop_err(net, x)
-
-        rhat = [ISTA(x[:,i], r[:,i], net, η=0.01f0, λ=0.001f0, target=0.001f0) for i in 1:20]
-        l[i] = loss_fn(rvs, rhat)
-    end
-    l
-end
-
-eval_model(xs, pnet)
-
+##
 Rnet = Chain(
     LSTM(100 + 4, 256),
     Dense(256, 100, tanh)
- ) |> gpu
+ )
+
 opt = ADAM(0.01)
 ps = Flux.params(Rnet)
-
-pnet = net |> gpu
 
 function loss_fn(x, y)
     sum(Flux.mse.(Rnet.(x), y))
 end
 
-# Ls = zeros(length(train_data))
-for epoch in 1:50
-    @time for (i, rvs) in enumerate(train_data)
-        x = xs[i] |> gpu
-        r = prop_err(pnet, x)
-        rhat = [ISTA(x[:,i], r[:,i], pnet, η=0.01f0, λ=0.001f0, target=0.001f0) for i in 1:20] |> gpu
-        l = Zygote.ignore() do
-            loss_fn(rvs, rhat)
-        end
-        Ls[i] = l
-        g = gradient(() -> loss_fn(rvs, rhat), ps)
+Zygote.@nograd function eval_model(xtest, ytest)
+    l = loss_fn.(xtest, ytest)
+    mean(l)
+end
+
+##
+
+function train_model!()
+    for (i, (x, y)) in enumerate(zip(xtrain, ytrain))
+
+        g = gradient(() -> loss_fn(x, y), ps)
         update!(opt, ps, g)
         Flux.reset!(Rnet)
     end
 end
+
+eval_model(xtest, ytest)
+
 ##
 
-ind = 2
-x = xs[ind]
-r = prop_err(net, x)
-rhat = [ISTA(x[:,i], r[:,i], net, η=0.01f0, λ=0.001f0, target=0.001f0) for i in 1:20]
+out = Rnet.(xtest[2]) .|> x -> net(x)
 
-Rnet = Rnet |> cpu
+tmp = [out[k][:,1] for k in 1:20]
 
-out = Rnet.(train_data[ind]) |> x -> net.(x)
+preds = reshape.(tmp, 16, 16)
 
-ys = [out[k][:,1] for k in 1:20]
-
-preds = reshape.(ys, 16, 16)
-
-heatmap(preds[4])
-
+heatmap(preds[9])
+x = xs[2]
 xx = reshape(x, 16, 16, 20)
 
 begin
-    i = 5
+    i = 3
     l = @layout [a b]
     im1 = heatmap(xx[:,:,i])
-    im2 = heatmap(preds[i])
+    im2 = heatmap(preds[i] |> cpu)
     plot(im1, im2, layout=l)
 end
 
 plot(Ls)
+
