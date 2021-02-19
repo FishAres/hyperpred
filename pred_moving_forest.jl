@@ -4,16 +4,15 @@ using Flux, CUDA
 using Plots
 using Flux: Data.DataLoader, update!, onehot, onehotbatch, chunk, batchseq
 using Zygote
-# using Distances:cosine_dist
-using Base.Iterators:partition
-using RecursiveArrayTools
+using Base.Iterators:partition, product
 
+device!(2) # CUDA device 1, Gerlach
 gr()
 theme(:juno)
 
 BSON.@load "saved_models/modelv4_adam_399ep.bson" net
-# JLD2.@load "data/moving_forest_v2_8k.jld2" ts as
-JLD2.@load "data/moving_forest_8k_training.jld2" train_data
+JLD2.@load "data/moving_forest_v2.jld2" ts as
+# JLD2.@load "data/moving_forest_8k_training.jld2" train_data
 
 CUDA.allowscalar(false)
 includet("utils.jl")
@@ -42,17 +41,19 @@ end
 function load_data(filename)
     @load filename ts as
     action_labels = map(x -> Float32.(Flux.onehotbatch(x, 1:4)), as)
-    xs = map(x -> reshape(Float32.(x), 256, 20), ts)
+    xs = map(x -> reshape(Float32.(x), 256, 40), ts)
     xs, action_labels
 end
 
 @inline function get_r(net, x)
-    # per batch issue?
     r = prop_err(net, x)
     rhat = ISTA(x, r, net, η=0.01f0, λ=0.001f0, target=0.001f0)
-    rhat
+    # normalize
+    mapslices(normalize, r, dims=1)
 end
 
+xs, as = load_data("data/moving_forest_v3_8k.jld2")
+# r = get_r(net, xs[4])
 
 @inline function prepare_data(filename, batchsize)
     xs, as = load_data(filename)
@@ -67,68 +68,123 @@ end
     f = @. Int(floor(N / batchsize))
     xy =  map(x -> reshape(x, size(x)[1:2]..., batchsize, f), xy)
     # return
-    map(x -> [[x[:,k,:,i] for k in 1:20] for i in 1:f], xy)
+    map(x -> [[x[:,k,:,i] for k in 1:40] for i in 1:f], xy)
 end
 
+##
+# xtrain, ytrain = prepare_data("data/moving_forest_v3_8k.jld2", 25)
 
-# xtrain, ytrain = prepare_data("data/moving_forest_v2_8k.jld2", 25)
-
-@load "data/mov_forest_training_data_8k.jld2" xtrain ytrain
+@load "data/mov_forest_training_data_v3_8k.jld2" xtrain ytrain
 
 ##
 batchsize = 25
-xtest, ytest = prepare_data("data/moving_forest_v2.jld2", batchsize)
+# xtest, ytest = prepare_data("data/moving_forest_v2.jld2", batchsize)
+0.8 * length(xtrain)
+
+x_train = xtrain[1:256]
+x_test = xtrain[256:end]
+
+y_train = ytrain[1:256]
+y_test = ytrain[256:end]
 
 ##
-Rnet = Chain(
-    LSTM(100 + 4, 256),
-    Dense(256, 100, tanh)
- )
-
-opt = ADAM(0.01)
-ps = Flux.params(Rnet)
-
-function loss_fn(x, y)
-    sum(Flux.mse.(Rnet.(x), y))
+@inline function loss_fn(x, y)
+    # Flux.reset!(Rnet)
+    r̂ = Rnet.(x)
+    l = sum(Flux.mse.(r̂, y))
+    l
 end
 
-Zygote.@nograd function eval_model(xtest, ytest)
-    l = loss_fn.(xtest, ytest)
+@inline Zygote.@nograd function eval_model(f, xtest, ytest)
+    l = f.(xtest, ytest)
     mean(l)
 end
 
 ##
+println("Meow")
+##
 
-function train_model!()
-    for (i, (x, y)) in enumerate(zip(xtrain, ytrain))
+optimizers = [ADAM, Descent]
+lrs = [0.01, 0.001]
+# acts = [tanh, σ, relu]
+Rs = [GRU, RNN]
+Ns = [128, 128,]
 
-        g = gradient(() -> loss_fn(x, y), ps)
-        update!(opt, ps, g)
-        Flux.reset!(Rnet)
+options = [Rs, Ns, optimizers, lrs]
+
+xtrain = x_train |> gpu
+ytrain = y_train |> gpu
+xtest, ytest = x_test |> gpu, y_test |> gpu
+xt, yt = xtest[1:10], ytest[1:10]
+
+train_data = [xtrain, ytrain, xt, yt]
+opts = [(RNN,), (32,), (ADAM,), (0.01,)]
+
+sparse_net = net
+norm1(x) = mean(sum(abs, x, dims=1))
+##
+
+function try_model(data, options, epochs)
+    xtrain, ytrain, xt, yt = data
+    models, r̄ = [], []
+    for config in product(options...)
+        Rmodel, N, optimizer, lr = config
+        @info "Creating model with $Rmodel, $N units and $((optimizer, lr))"
+        # Model definition
+        Rnet = Chain(
+        Rmodel(100 + 4, N),
+        Dense(N, 100),
+        x -> tanh.(x),
+        ) |> gpu
+
+        opt = optimizer(lr)
+        ps = Flux.params(Rnet)
+
+        loss(x, y) = begin
+           out = Rnet.(x)
+           sum(Flux.mse.(out, y) + 0.2 * map(norm1, out))
+        end
+
+        for epoch in 1:epochs
+            Flux.train!(
+            loss,
+            ps,
+            zip(xtrain, ytrain),
+            opt, )
+            val_loss = eval_model(loss, xt, yt)
+            println("Epoch: $epoch, val loss: $(round(val_loss, digits=4))")
+        end
+        out = Rnet.(x_test[8]) |> cpu
+        r̂ = hcat([out[k][:,1] for k in 1:40]...) |> cpu
+        Rnet = Rnet |> cpu
+        push!(models, Rnet)
+        push!(r̄, r̂)
     end
+    Dict("models" => models, "r̄" => r̄)
 end
-
-eval_model(xtest, ytest)
 
 ##
 
-out = Rnet.(xtest[2]) .|> x -> net(x)
+model_dict = try_model(train_data, options, 20)
 
-tmp = [out[k][:,1] for k in 1:20]
+##
 
-preds = reshape.(tmp, 16, 16)
-
-heatmap(preds[9])
-x = xs[2]
-xx = reshape(x, 16, 16, 20)
-
-begin
-    i = 3
-    l = @layout [a b]
-    im1 = heatmap(xx[:,:,i])
-    im2 = heatmap(preds[i] |> cpu)
-    plot(im1, im2, layout=l)
+function plot_rs(ind)
+    l = @layout [a ; b]
+    tmp = model_dict["r̄"][ind]
+    f1 = heatmap(tmp)
+    f2 = heatmap(hcat([y_test[8][k][:,1] for k in 1:40]...))
+    plot(f1, f2, layout=l)
 end
 
-plot(Ls)
+
+function train_model!(xs, ys)
+    for (i, (x, y)) in enumerate(zip(xs, ys))
+        x, y = x |> gpu, y |> gpu
+        g = gradient(() -> loss_fn(x, y), ps)
+        update!(opt, ps, g)
+        # Flux.reset!(Rnet)
+    end
+    callback()
+end
 

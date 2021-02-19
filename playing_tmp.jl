@@ -60,7 +60,7 @@ function train!(net, opt, loader)
                 # norm_rf!
             end
         end
-
+        norm_rf!(r)
         grad = pc_gradient(net, x, r)
         update!(opt, Flux.params(net), grad)
         norm_rf!(net.W)
@@ -70,7 +70,7 @@ function train!(net, opt, loader)
     end
     loss_ = round(loss_, digits=6)
     tot_time = round(time() - strt, digits=3)
-    println("Trained 1 epoch, loss = $loss_, took $tot_time s")
+    println("Loss = $loss_, took $tot_time s")
 
 end
 
@@ -78,39 +78,43 @@ end
 dev = gpu
 Z = 100
 pnet = Dense(Z, 256) |> dev
-opt = RMSProp(0.01)
+opt = ADAM(0.01)
 
-epochs = 100
+epochs = 400
 
 for epoch in 1:epochs
     train!(pnet, opt, train_loader)
+    if (epoch + 1) % 100 == 0
+        net = cpu(pnet)
+        BSON.@save "saved_models/modelv4_adam_normr_$(epoch)ep.bson" net
+    end
     println("Finished epoch $epoch")
 end
 
 ##
-xs = first(test_loader)
-x = xs |> Flux.flatten |> dev
-r = (prop_err(pnet, x))
-rhat = ISTA(x, r, pnet, η=0.01f0, λ=0.001f0, target=0.0005f0)
-println("Sparsity : $(sparsity(rhat))")
+# xs = first(test_loader)
+# x = xs |> Flux.flatten |> dev
+# r = (prop_err(pnet, x))
+# rhat = ISTA(x, r, pnet, η=0.01f0, λ=0.001f0, target=0.0005f0)
+# println("Sparsity : $(sparsity(rhat))")
 
-pred = pnet(rhat)
-println("Loss : $(loss(pred, x)) ")
-# imshow_Wcol(rand(1:Z), pnet.W |> cpu)
-# imshow_Wcol(rand(1:batchsize), pred |> cpu)
+# pred = pnet(rhat)
+# println("Loss : $(loss(pred, x)) ")
+# # imshow_Wcol(rand(1:Z), pnet.W |> cpu)
+# # imshow_Wcol(rand(1:batchsize), pred |> cpu)
 
-begin
-    i = 5
-    l = @layout [a b]
-    im1 = imshow_Wcol(i, pred |> cpu)
-    im2 = imshow_Wcol(i, x |> cpu)
-    plot(im1, im2, layout=l)
-end
+# begin
+#     i = 5
+#     l = @layout [a b]
+#     im1 = imshow_Wcol(i, pred |> cpu)
+#     im2 = imshow_Wcol(i, x |> cpu)
+#     plot(im1, im2, layout=l)
+# end
 
-
+heatmap(pnet.W  |> cpu)
 ##
 
-net = cpu(pnet)
+# net = cpu(pnet)
 
 # using BSON: @save, @load
 # BSON.@save "saved_models/modelv2_120ep.bson" net

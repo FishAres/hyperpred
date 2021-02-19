@@ -42,11 +42,8 @@ function forest_7timeslice(data; save=true)
         @save "data/testing_forest.jld2" test_data
     end
 end
-
+"Divide video into [fsize[1], fsize[2], :] frames"
 function forest_div(data, fsize; train_fr=0.75, save=true)
-    "Divide video into [fsize[1], fsize[2], :]
-    frames"
-
     out = [get_blocks(data[i,:,:], fsize) for i in 1:size(data, 1)]
 
     split = Int(floor(train_fr * length(out)))
@@ -58,8 +55,9 @@ function forest_div(data, fsize; train_fr=0.75, save=true)
     end
 end
 
+" Divide MxN image into blocks of fsize[1] x fsize[2]"
 function get_blocks(x, fsize)
-    " Divide MxN image into blocks of fsize[1] x fsize[2]"
+
     # max number of windows
     bounds = map((x, f) -> Int(floor(x / f)), size(x), fsize)
     # initialize

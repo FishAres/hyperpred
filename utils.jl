@@ -3,7 +3,6 @@ using Flux
 using Plots: plot, @animate, heatmap!, gif
 using Lazy:@as
 
-
 loss_function(x, y) = Flux.mse(x, y)
 
 function soft_threshold(x, λ)
