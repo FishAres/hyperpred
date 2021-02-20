@@ -6,7 +6,7 @@ using Flux: Data.DataLoader, update!, onehot, onehotbatch, chunk, batchseq
 using Zygote
 using Base.Iterators:partition, product
 
-device!(2) # CUDA device 1, Gerlach
+device!(0) # CUDA device 1, Gerlach
 gr()
 theme(:juno)
 
@@ -100,15 +100,24 @@ end
     mean(l)
 end
 
+function train_model!(xs, ys, opt, lossfn, ps)
+    for (i, (x, y)) in enumerate(zip(xs, ys))
+        x, y = x |> gpu, y |> gpu
+        g = gradient(() -> lossfn(x, y), ps)
+        update!(opt, ps, g)
+        # Flux.reset!(Rnet)
+    end
+end
+
 ##
 println("Meow")
 ##
 
 optimizers = [ADAM, Descent]
-lrs = [0.01, 0.001]
+lrs = [0.001]
 # acts = [tanh, σ, relu]
 Rs = [GRU, RNN]
-Ns = [128, 128,]
+Ns = [64, 128,]
 
 options = [Rs, Ns, optimizers, lrs]
 
@@ -134,7 +143,7 @@ function try_model(data, options, epochs)
         Rnet = Chain(
         Rmodel(100 + 4, N),
         Dense(N, 100),
-        x -> tanh.(x),
+        # x -> tanh.(x),
         ) |> gpu
 
         opt = optimizer(lr)
@@ -142,7 +151,7 @@ function try_model(data, options, epochs)
 
         loss(x, y) = begin
            out = Rnet.(x)
-           sum(Flux.mse.(out, y) + 0.2 * map(norm1, out))
+           sum(Flux.mse.(out, y) + 0.2f0 * map(norm1, out))
         end
 
         for epoch in 1:epochs
@@ -154,9 +163,9 @@ function try_model(data, options, epochs)
             val_loss = eval_model(loss, xt, yt)
             println("Epoch: $epoch, val loss: $(round(val_loss, digits=4))")
         end
-        out = Rnet.(x_test[8]) |> cpu
+        out = Rnet.(xt[8]) |> cpu
         r̂ = hcat([out[k][:,1] for k in 1:40]...) |> cpu
-        Rnet = Rnet |> cpu
+        Rnet = cpu(Rnet)
         push!(models, Rnet)
         push!(r̄, r̂)
     end
@@ -165,7 +174,7 @@ end
 
 ##
 
-model_dict = try_model(train_data, options, 20)
+model_dict = try_model(train_data, options, 100)
 
 ##
 
@@ -173,18 +182,18 @@ function plot_rs(ind)
     l = @layout [a ; b]
     tmp = model_dict["r̄"][ind]
     f1 = heatmap(tmp)
+    title!("$(perms[ind]), $ind")
     f2 = heatmap(hcat([y_test[8][k][:,1] for k in 1:40]...))
     plot(f1, f2, layout=l)
 end
 
+perms = collect(product(options...))[:]
 
-function train_model!(xs, ys)
-    for (i, (x, y)) in enumerate(zip(xs, ys))
-        x, y = x |> gpu, y |> gpu
-        g = gradient(() -> loss_fn(x, y), ps)
-        update!(opt, ps, g)
-        # Flux.reset!(Rnet)
-    end
-    callback()
+begin
+    ind = 12
+    plot_rs(ind)
 end
 
+pred = mapslices(sparse_net, model_dict["r̄"][ind], dims=1)
+quick_anim(permutedims(reshape(pred, 16, 16, 40), [3, 2, 1]),
+    savestring="$(join(perms[ind])).gif")
